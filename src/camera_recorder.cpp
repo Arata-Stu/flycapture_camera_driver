@@ -85,19 +85,31 @@ private:
 
   void start_new_record_directory()
   {
-      // 現在時刻を取得してタイムスタンプを生成
+      // 現在時刻を取得
       auto now = std::chrono::system_clock::now();
       auto duration = now.time_since_epoch();
-      std::time_t current_time = std::chrono::system_clock::to_time_t(now);
+      auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+      auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(duration).count() % 1000000;
+
+      // JSTに変換
+      std::time_t current_time = std::chrono::system_clock::to_time_t(now + std::chrono::hours(9));
       std::tm *local_time = std::localtime(&current_time);
 
-      char directory_name[100];
-      std::strftime(directory_name, sizeof(directory_name), "%Y%m%d_%H%M%S", local_time);
+      // フォーマットされた時間文字列を生成
+      char formatted_time[100];
+      std::strftime(formatted_time, sizeof(formatted_time), "%Y%m%d_%H%M%S", local_time);
 
-      // 保存ディレクトリを時刻ベースで作成
-      current_save_directory = base_save_directory + "/" + std::string(directory_name);
+      // フォーマットした時間にマイクロ秒を追加してディレクトリ名を作成
+      std::ostringstream directory_name;
+      directory_name << formatted_time << "_" << std::setw(6) << std::setfill('0') << microseconds;
+
+      // 保存ディレクトリを作成
+      current_save_directory = base_save_directory + "/" + directory_name.str();
       fs::create_directories(current_save_directory);
+
+      RCLCPP_INFO(this->get_logger(), "New record directory created: %s", current_save_directory.c_str());
   }
+
 
 
   unsigned int get_num_cameras(FlyCapture2::BusManager *bus_manager)
@@ -225,16 +237,22 @@ private:
               image_queue.pop();
               lock.unlock();
 
-              // 現在時刻を取得してタイムスタンプを生成
+              // 現在時刻を取得
               auto now = std::chrono::system_clock::now();
               auto duration = now.time_since_epoch();
-              auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+
+              // JSTに変換
+              std::time_t current_time = std::chrono::system_clock::to_time_t(now + std::chrono::hours(9));
+              std::tm *local_time = std::localtime(&current_time);
+
+              // フォーマットされた時間文字列を生成
+              char formatted_time[100];
+              std::strftime(formatted_time, sizeof(formatted_time), "%Y%m%d_%H%M%S", local_time);
+
+              // マイクロ秒を追加
               auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(duration).count() % 1000000;
-
-              // ファイル名にタイムスタンプを使用
               std::ostringstream filename;
-              filename << current_save_directory << "/frame_" << seconds << "_" << std::setw(6) << std::setfill('0') << microseconds << ".png";
-
+              filename << current_save_directory << "/frame_" << formatted_time << "_" << std::setw(6) << std::setfill('0') << microseconds << ".png";
               // 画像を保存
               cv::imwrite(filename.str(), image);
 
