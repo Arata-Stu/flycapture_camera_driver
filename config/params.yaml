@@ -1,0 +1,6 @@
+/**:
+  ros__parameters:
+    mode: 2
+    timeout: 1000
+    frame_rate_ms: 33 ## ms
+    save_directory: '/home/arata22/Documents/flycapture/images'

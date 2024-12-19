@@ -1,0 +1,9 @@
+<launch>
+  <arg name="camera_param" default="$(find-pkg-share flycapture_camera_driver)/config/params.yaml"/>
+
+  <!-- grasshopper3の起動 -->
+  <node pkg="flycapture_camera_driver" exec="camera_recorder" name="camera_recorder" output="screen">
+    <param from="$(var camera_param)"/>
+  </node>
+
+</launch>
