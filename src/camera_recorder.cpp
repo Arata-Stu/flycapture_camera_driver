@@ -198,68 +198,56 @@ private:
 
   void display_callback()
   {
-    FlyCapture2::Image raw_image;
-    FlyCapture2::Error error = camera->RetrieveBuffer(&raw_image);
-    if (error != FlyCapture2::PGRERROR_OK)
-    {
-      error.PrintErrorTrace();
-      return;
-    }
-
-    FlyCapture2::Image rgb_image;
-    raw_image.Convert(FlyCapture2::PIXEL_FORMAT_BGR, &rgb_image);
-
-    cv::Mat image(cv::Size(rgb_image.GetCols(), rgb_image.GetRows()), CV_8UC3, rgb_image.GetData());
-
-    // ウィンドウに表示
-    cv::imshow("Grasshopper3 Viewer", image);
-    cv::waitKey(1);
-
-    // 画像をバッファに追加
-    if (is_recording)
-    {
-      std::lock_guard<std::mutex> lock(queue_mutex);
-      image_queue.push(image.clone());
-      condition.notify_one();
-    }
-  }
-
-  void save_images()
-  {
-      while (!stop_saving)
+      FlyCapture2::Image raw_image;
+      FlyCapture2::Error error = camera->RetrieveBuffer(&raw_image);
+      if (error != FlyCapture2::PGRERROR_OK)
       {
-          std::unique_lock<std::mutex> lock(queue_mutex);
-          condition.wait(lock, [this]() { return !image_queue.empty() || stop_saving; });
+          error.PrintErrorTrace();
+          return;
+      }
 
-          while (!image_queue.empty())
-          {
-              cv::Mat image = image_queue.front();
-              image_queue.pop();
-              lock.unlock();
+      FlyCapture2::Image rgb_image;
+      raw_image.Convert(FlyCapture2::PIXEL_FORMAT_BGR, &rgb_image);
 
-              // 現在時刻を取得
-              auto now = std::chrono::system_clock::now();
-              auto duration = now.time_since_epoch();
+      cv::Mat image(cv::Size(rgb_image.GetCols(), rgb_image.GetRows()), CV_8UC3, rgb_image.GetData());
 
-              // JSTに変換
-              std::time_t current_time = std::chrono::system_clock::to_time_t(now + std::chrono::hours(9));
-              std::tm *local_time = std::localtime(&current_time);
+      // ウィンドウに表示
+      cv::imshow("Grasshopper3 Viewer", image);
+      cv::waitKey(1);
 
-              // フォーマットされた時間文字列を生成
-              char formatted_time[100];
-              std::strftime(formatted_time, sizeof(formatted_time), "%Y%m%d_%H%M%S", local_time);
-
-              // マイクロ秒を追加
-              auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(duration).count() % 1000000;
-              std::ostringstream filename;
-              filename << current_save_directory << "/frame_" << formatted_time << "_" << std::setw(6) << std::setfill('0') << microseconds << ".png";
-              // 画像を保存
-              cv::imwrite(filename.str(), image);
-
-              lock.lock();
-          }
+      // 録画中の場合に即時保存
+      if (is_recording)
+      {
+          save_image(image);
       }
   }
+
+  void save_image(const cv::Mat &image)
+  {
+      // 現在時刻を取得
+      auto now = std::chrono::system_clock::now();
+      auto duration = now.time_since_epoch();
+
+      // JSTに変換
+      std::time_t current_time = std::chrono::system_clock::to_time_t(now + std::chrono::hours(9));
+      std::tm *local_time = std::localtime(&current_time);
+
+      // フォーマットされた時間文字列を生成
+      char formatted_time[100];
+      std::strftime(formatted_time, sizeof(formatted_time), "%Y%m%d_%H%M%S", local_time);
+
+      // マイクロ秒を追加
+      auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(duration).count() % 1000000;
+      std::ostringstream filename;
+      filename << current_save_directory << "/frame_" << formatted_time << "_" << std::setw(6) << std::setfill('0') << microseconds << ".jpg";
+
+      // 画像をJPEG形式で保存
+      std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 90}; // 画質90%を指定
+      cv::imwrite(filename.str(), image, compression_params);
+
+      RCLCPP_INFO(this->get_logger(), "Image saved: %s", filename.str().c_str());
+  }
+
 
 
 
