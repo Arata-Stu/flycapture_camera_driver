@@ -130,61 +130,56 @@ private:
     return cameras;
   }
 
-  void initialize_camera(FlyCapture2::Camera **camera,
+    void initialize_camera(FlyCapture2::Camera **camera,
                          FlyCapture2::BusManager *bus_manager,
                          int camera_num,
                          FlyCapture2::Mode desired_mode,
                          FlyCapture2::PixelFormat desired_pixel_format,
                          int timeout_ms)
-  {
-    FlyCapture2::PGRGuid guid;
-    FlyCapture2::Error error = bus_manager->GetCameraFromIndex(0, &guid);
-    if (error != FlyCapture2::PGRERROR_OK)
     {
-      error.PrintErrorTrace();
-      std::exit(-1);
-    }
+      FlyCapture2::PGRGuid guid;
+      FlyCapture2::Error error = bus_manager->GetCameraFromIndex(0, &guid);
+      if (error != FlyCapture2::PGRERROR_OK)
+      {
+        error.PrintErrorTrace();
+        std::exit(-1);
+      }
 
-    *camera = new FlyCapture2::Camera();
+      *camera = new FlyCapture2::Camera();
 
-    error = (*camera)->Connect(&guid);
-    if (error != FlyCapture2::PGRERROR_OK)
-    {
-      error.PrintErrorTrace();
-      std::exit(-1);
-    }
+      error = (*camera)->Connect(&guid);
+      if (error != FlyCapture2::PGRERROR_OK)
+      {
+        error.PrintErrorTrace();
+        std::exit(-1);
+      }
 
-    FlyCapture2::Format7ImageSettings image_settings;
-    FlyCapture2::Format7PacketInfo packet_info;
-    bool supported = false;
+      // Check and set the standard video mode and frame rate
+      bool is_supported = false;
+      error = (*camera)->GetVideoModeAndFrameRateInfo(FlyCapture2::VIDEOMODE_800x600RGB,
+                                                      FlyCapture2::FRAMERATE_30,
+                                                      &is_supported);
+      if (error != FlyCapture2::PGRERROR_OK)
+      {
+        error.PrintErrorTrace();
+        std::exit(-1);
+      }
 
-    FlyCapture2::Format7Info format7_info;
-    format7_info.mode = desired_mode;
+      if (!is_supported)
+      {
+        std::cerr << "Error: The camera does not support 800x600 RGB8 at 30Hz." << std::endl;
+        std::exit(-1);
+      }
 
-    error = (*camera)->GetFormat7Info(&format7_info, &supported);
-    if (error != FlyCapture2::PGRERROR_OK)
-    {
-      error.PrintErrorTrace();
-      std::exit(-1);
-    }
-
-    if (supported)
-    {
-      image_settings.mode = desired_mode;
-      image_settings.pixelFormat = desired_pixel_format;
-      image_settings.offsetX = 0;
-      image_settings.offsetY = 0;
-      image_settings.width = format7_info.maxWidth;
-      image_settings.height = format7_info.maxHeight;
-
-      error = (*camera)->SetFormat7Configuration(&image_settings, packet_info.recommendedBytesPerPacket);
+      error = (*camera)->SetVideoModeAndFrameRate(FlyCapture2::VIDEOMODE_800x600RGB,
+                                                  FlyCapture2::FRAMERATE_30);
       if (error != FlyCapture2::PGRERROR_OK)
       {
         error.PrintErrorTrace();
         std::exit(-1);
       }
     }
-  }
+
 
   void start_capture(FlyCapture2::Camera **camera)
   {
