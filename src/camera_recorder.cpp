@@ -156,7 +156,7 @@ private:
 
       // Check and set the standard video mode and frame rate
       bool is_supported = false;
-      error = (*camera)->GetVideoModeAndFrameRateInfo(FlyCapture2::VIDEOMODE_800x600RGB,
+      error = (*camera)->GetVideoModeAndFrameRateInfo(FlyCapture2::VIDEOMODE_800x600YUV422,
                                                       FlyCapture2::FRAMERATE_30,
                                                       &is_supported);
       if (error != FlyCapture2::PGRERROR_OK)
@@ -171,7 +171,7 @@ private:
         std::exit(-1);
       }
 
-      error = (*camera)->SetVideoModeAndFrameRate(FlyCapture2::VIDEOMODE_800x600RGB,
+      error = (*camera)->SetVideoModeAndFrameRate(FlyCapture2::VIDEOMODE_800x600YUV422,
                                                   FlyCapture2::FRAMERATE_30);
       if (error != FlyCapture2::PGRERROR_OK)
       {
