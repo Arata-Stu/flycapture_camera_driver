@@ -13,20 +13,20 @@ namespace fs = std::filesystem;
 class Grasshopper3Viewer : public rclcpp::Node
 {
 public:
-  Grasshopper3Viewer() : Node("grasshopper3_viewer"), is_recording(false), stop_saving(false), record_number(0)
+  Grasshopper3Viewer()
+    : Node("grasshopper3_viewer"),
+      is_recording(false),
+      stop_saving(false),
+      record_number(0)
   {
     // パラメータの宣言と取得
-    declare_parameter("mode", 2);
     declare_parameter("timeout", 1000);
-    declare_parameter("frame_rate_ms", 33); // フレームレート周期（ミリ秒）を追加
-    declare_parameter("save_directory", "./images"); // 保存先ディレクトリを追加
+    declare_parameter("frame_rate_ms", 33);           // フレームレート周期（ミリ秒）
+    declare_parameter("save_directory", "./images");  // 保存先ディレクトリ
 
-    mode = get_parameter("mode").as_int();
     timeout = get_parameter("timeout").as_int();
     frame_rate_ms = get_parameter("frame_rate_ms").as_int();
     base_save_directory = get_parameter("save_directory").as_string();
-
-    desired_mode = static_cast<FlyCapture2::Mode>(mode);
 
     // 保存ディレクトリの管理
     if (!fs::exists(base_save_directory))
@@ -37,7 +37,7 @@ public:
 
     // FlyCapture2のカメラ初期化
     int camera_num = get_num_cameras(&busMgr);
-    initialize_camera(&camera, &busMgr, camera_num, desired_mode, FlyCapture2::PIXEL_FORMAT_RAW8, timeout);
+    initialize_camera(&camera, &busMgr, camera_num, timeout);
 
     // カメラのキャプチャを開始
     start_capture(&camera);
@@ -47,11 +47,15 @@ public:
 
     // ウィンドウを表示するタイマー
     timer_ = this->create_wall_timer(
-      std::chrono::milliseconds(frame_rate_ms), std::bind(&Grasshopper3Viewer::display_callback, this));
+      std::chrono::milliseconds(frame_rate_ms),
+      std::bind(&Grasshopper3Viewer::display_callback, this)
+    );
 
-    // レコーディングスタート/ストップのサービスを追加
+    // レコーディングスタート/ストップ用のサービス
     record_service_ = this->create_service<std_srvs::srv::SetBool>(
-        "set_recording", std::bind(&Grasshopper3Viewer::set_recording_callback, this, std::placeholders::_1, std::placeholders::_2));
+        "set_recording",
+        std::bind(&Grasshopper3Viewer::set_recording_callback, this, std::placeholders::_1, std::placeholders::_2)
+    );
   }
 
   ~Grasshopper3Viewer()
@@ -65,9 +69,16 @@ public:
   }
 
 private:
+  // ◆◆◆ 画像とカメラタイムスタンプをペアで保持する構造体 ◆◆◆
+  struct ImageData
+  {
+    cv::Mat image;
+    FlyCapture2::TimeStamp timestamp;
+  };
+
+  // ディレクトリ番号の更新
   void update_record_number()
   {
-    // 現在のディレクトリ内の最大番号を取得
     record_number = 0;
     for (const auto &entry : fs::directory_iterator(base_save_directory))
     {
@@ -83,6 +94,7 @@ private:
     }
   }
 
+  // 新しいレコード用ディレクトリの作成
   void start_new_record_directory()
   {
       // 現在時刻を取得
@@ -99,9 +111,10 @@ private:
       char formatted_time[100];
       std::strftime(formatted_time, sizeof(formatted_time), "%Y%m%d_%H%M%S", local_time);
 
-      // フォーマットした時間にマイクロ秒を追加してディレクトリ名を作成
+      // ディレクトリ名: YYYYMMDD_HHMMSS_マイクロ秒
       std::ostringstream directory_name;
-      directory_name << formatted_time << "_" << std::setw(6) << std::setfill('0') << microseconds;
+      directory_name << formatted_time << "_"
+                     << std::setw(6) << std::setfill('0') << microseconds;
 
       // 保存ディレクトリを作成
       current_save_directory = base_save_directory + "/" + directory_name.str();
@@ -110,8 +123,7 @@ private:
       RCLCPP_INFO(this->get_logger(), "New record directory created: %s", current_save_directory.c_str());
   }
 
-
-
+  // カメラ数の取得
   unsigned int get_num_cameras(FlyCapture2::BusManager *bus_manager)
   {
     unsigned int cameras;
@@ -130,57 +142,58 @@ private:
     return cameras;
   }
 
-    void initialize_camera(FlyCapture2::Camera **camera,
+  // ◆◆◆ カメラの初期化 (VideoMode指定バージョン) ◆◆◆
+  void initialize_camera(FlyCapture2::Camera **camera,
                          FlyCapture2::BusManager *bus_manager,
                          int camera_num,
-                         FlyCapture2::Mode desired_mode,
-                         FlyCapture2::PixelFormat desired_pixel_format,
                          int timeout_ms)
+  {
+    FlyCapture2::PGRGuid guid;
+    FlyCapture2::Error error = bus_manager->GetCameraFromIndex(0, &guid);
+    if (error != FlyCapture2::PGRERROR_OK)
     {
-      FlyCapture2::PGRGuid guid;
-      FlyCapture2::Error error = bus_manager->GetCameraFromIndex(0, &guid);
-      if (error != FlyCapture2::PGRERROR_OK)
-      {
-        error.PrintErrorTrace();
-        std::exit(-1);
-      }
-
-      *camera = new FlyCapture2::Camera();
-
-      error = (*camera)->Connect(&guid);
-      if (error != FlyCapture2::PGRERROR_OK)
-      {
-        error.PrintErrorTrace();
-        std::exit(-1);
-      }
-
-      // Check and set the standard video mode and frame rate
-      bool is_supported = false;
-      error = (*camera)->GetVideoModeAndFrameRateInfo(FlyCapture2::VIDEOMODE_800x600YUV422,
-                                                      FlyCapture2::FRAMERATE_30,
-                                                      &is_supported);
-      if (error != FlyCapture2::PGRERROR_OK)
-      {
-        error.PrintErrorTrace();
-        std::exit(-1);
-      }
-
-      if (!is_supported)
-      {
-        std::cerr << "Error: The camera does not support 800x600 RGB8 at 30Hz." << std::endl;
-        std::exit(-1);
-      }
-
-      error = (*camera)->SetVideoModeAndFrameRate(FlyCapture2::VIDEOMODE_800x600YUV422,
-                                                  FlyCapture2::FRAMERATE_30);
-      if (error != FlyCapture2::PGRERROR_OK)
-      {
-        error.PrintErrorTrace();
-        std::exit(-1);
-      }
+      error.PrintErrorTrace();
+      std::exit(-1);
     }
 
+    *camera = new FlyCapture2::Camera();
 
+    error = (*camera)->Connect(&guid);
+    if (error != FlyCapture2::PGRERROR_OK)
+    {
+      error.PrintErrorTrace();
+      std::exit(-1);
+    }
+
+    // ◆◆◆ ここで VideoMode と FrameRate を設定 ◆◆◆
+    error = (*camera)->SetVideoModeAndFrameRate(
+              FlyCapture2::VIDEOMODE_800x600YUV422,
+              FlyCapture2::FRAMERATE_30
+            );
+    if (error != FlyCapture2::PGRERROR_OK)
+    {
+      error.PrintErrorTrace();
+      std::exit(-1);
+    }
+
+    // タイムアウトを設定（イメージ取得時の待ち時間）
+    FlyCapture2::FC2Config config;
+    error = (*camera)->GetConfiguration(&config);
+    if (error != FlyCapture2::PGRERROR_OK)
+    {
+      error.PrintErrorTrace();
+      std::exit(-1);
+    }
+    config.grabTimeout = timeout_ms;
+    error = (*camera)->SetConfiguration(&config);
+    if (error != FlyCapture2::PGRERROR_OK)
+    {
+      error.PrintErrorTrace();
+      std::exit(-1);
+    }
+  }
+
+  // カメラのキャプチャ開始
   void start_capture(FlyCapture2::Camera **camera)
   {
     FlyCapture2::Error error = (*camera)->StartCapture();
@@ -191,6 +204,7 @@ private:
     }
   }
 
+  // 画像取得と表示用コールバック
   void display_callback()
   {
     FlyCapture2::Image raw_image;
@@ -201,6 +215,10 @@ private:
       return;
     }
 
+    // カメラタイムスタンプの取得（秒・マイクロ秒）
+    FlyCapture2::TimeStamp cam_timestamp = raw_image.GetTimeStamp();
+
+    // カメラ画像をBGRへ変換しOpenCVマットへ
     FlyCapture2::Image rgb_image;
     raw_image.Convert(FlyCapture2::PIXEL_FORMAT_BGR, &rgb_image);
 
@@ -210,63 +228,60 @@ private:
     cv::imshow("Grasshopper3 Viewer", image);
     cv::waitKey(1);
 
-    // 画像をバッファに追加
+    // レコーディング中であれば保存用キューへ詰める
     if (is_recording)
     {
+      ImageData data;
+      data.image = image.clone();         // コピー
+      data.timestamp = cam_timestamp;     // カメラから取得したタイムスタンプ
+
       std::lock_guard<std::mutex> lock(queue_mutex);
-      image_queue.push(image.clone());
+      image_queue.push(data);
       condition.notify_one();
     }
   }
 
+  // 画像保存用スレッド
   void save_images()
   {
-      while (!stop_saving)
+    while (!stop_saving)
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex);
+      condition.wait(lock, [this]() { return !image_queue.empty() || stop_saving; });
+
+      while (!image_queue.empty())
       {
-          std::unique_lock<std::mutex> lock(queue_mutex);
-          condition.wait(lock, [this]() { return !image_queue.empty() || stop_saving; });
+        ImageData data = image_queue.front();
+        image_queue.pop();
+        lock.unlock();
 
-          while (!image_queue.empty())
-          {
-              cv::Mat image = image_queue.front();
-              image_queue.pop();
-              lock.unlock();
+        // カメラのタイムスタンプ (sec, usec)
+        unsigned long sec = data.timestamp.seconds;
+        unsigned long usec = data.timestamp.microSeconds;
 
-              // 現在時刻を取得
-              auto now = std::chrono::system_clock::now();
-              auto duration = now.time_since_epoch();
+        // ファイル名: frame_sec_usec.jpg
+        std::ostringstream filename;
+        std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 90};
+        filename << current_save_directory << "/frame_"
+                 << sec << "_"
+                 << std::setw(6) << std::setfill('0') << usec
+                 << ".jpg";
 
-              // JSTに変換
-              std::time_t current_time = std::chrono::system_clock::to_time_t(now + std::chrono::hours(9));
-              std::tm *local_time = std::localtime(&current_time);
+        // 画像を保存
+        cv::imwrite(filename.str(), data.image, compression_params);
 
-              // フォーマットされた時間文字列を生成
-              char formatted_time[100];
-              std::strftime(formatted_time, sizeof(formatted_time), "%Y%m%d_%H%M%S", local_time);
-
-              // マイクロ秒を追加
-              auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(duration).count() % 1000000;
-              std::ostringstream filename;
-              std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 90}; // JPEG品質を90に設定
-              filename << current_save_directory << "/frame_" << formatted_time << "_" 
-                      << std::setw(6) << std::setfill('0') << microseconds << ".jpg"; // 拡張子を".jpg"に変更
-
-              // 画像を保存
-              cv::imwrite(filename.str(), image, compression_params);
-
-              lock.lock();
-          }
+        lock.lock();
       }
+    }
   }
 
-
-
-
+  // サービスコールバック（レコーディングの開始／停止）
   void set_recording_callback(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
                               std::shared_ptr<std_srvs::srv::SetBool::Response> response)
   {
     if (request->data)
     {
+      // 新しいディレクトリを作成してレコード開始
       start_new_record_directory();
       is_recording = true;
       response->success = true;
@@ -275,6 +290,7 @@ private:
     }
     else
     {
+      // レコーディング停止
       is_recording = false;
       response->success = true;
       response->message = "Recording stopped.";
@@ -282,7 +298,6 @@ private:
     }
   }
 
-  int mode;
   int timeout;
   int frame_rate_ms;
   std::string base_save_directory;
@@ -290,13 +305,11 @@ private:
   int record_number;
 
   FlyCapture2::BusManager busMgr;
-  FlyCapture2::Camera *camera;
-  FlyCapture2::Mode desired_mode;
-
+  FlyCapture2::Camera *camera; // VideoMode用なので、Format7は削除
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr record_service_;
 
-  std::queue<cv::Mat> image_queue;
+  std::queue<ImageData> image_queue;
   std::mutex queue_mutex;
   std::condition_variable condition;
   std::thread save_thread;
