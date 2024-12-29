@@ -5,6 +5,7 @@
     save_directory: '/home/arata22/recording/images'
     video_mode: 'VIDEOMODE_800x600YUV422'
     frame_rate: 'FRAMERATE_30'
+    show_window: true
 
 
 ## VIDEO_MODEのリストをすべて列挙する
