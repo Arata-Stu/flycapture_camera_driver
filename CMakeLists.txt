@@ -9,8 +9,8 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
-# find_package(std_srvs REQUIRED)
-find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+# find_package(std_msgs REQUIRED)
 
 
 include_directories(/usr/include/flycapture)
@@ -21,7 +21,7 @@ add_executable(
   src/camera_recorder.cpp
 )
 
-ament_target_dependencies(camera_recorder rclcpp OpenCV std_msgs)
+ament_target_dependencies(camera_recorder rclcpp OpenCV std_srvs)
 TARGET_LINK_LIBRARIES(camera_recorder /usr/lib/libflycapture.so -lpthread -lm)
 
 install(TARGETS
