@@ -25,12 +25,15 @@ public:
     // ★★★ VideoMode と FrameRate を文字列で宣言 ★★★
     declare_parameter("video_mode", "VIDEOMODE_800x600YUV422");
     declare_parameter("frame_rate", "FRAMERATE_30");
+    declare_parameter("show_window", true);  
 
     timeout           = get_parameter("timeout").as_int();
     frame_rate_ms     = get_parameter("frame_rate_ms").as_int();
     base_save_directory = get_parameter("save_directory").as_string();
     video_mode_str    = get_parameter("video_mode").as_string();
     frame_rate_str    = get_parameter("frame_rate").as_string();
+    show_window       = get_parameter("show_window").as_bool();
+
 
     // 保存ディレクトリの管理
     if (!fs::exists(base_save_directory))
@@ -56,7 +59,7 @@ public:
 
     // レコーディングスタート/ストップ用のサービス
     record_service_ = this->create_service<std_srvs::srv::SetBool>(
-        "set_recording",
+        "fly_set_recording",
         std::bind(&Grasshopper3Viewer::set_recording_callback, this, std::placeholders::_1, std::placeholders::_2)
     );
   }
@@ -233,9 +236,12 @@ private:
 
     cv::Mat image(cv::Size(rgb_image.GetCols(), rgb_image.GetRows()), CV_8UC3, rgb_image.GetData());
 
-    // ウィンドウ表示
-    cv::imshow("Grasshopper3 Viewer", image);
-    cv::waitKey(1);
+    // パラメータに基づきウィンドウ表示
+    if (show_window)
+    {
+      cv::imshow("Grasshopper3 Viewer", image);
+      cv::waitKey(1);
+    }
 
     // レコーディング中なら保存用キューへ
     if (is_recording)
@@ -332,6 +338,7 @@ private:
 
   std::string video_mode_str;
   std::string frame_rate_str;
+  bool show_window;
 
   std::string current_save_directory;   
   std::string base_save_directory;
