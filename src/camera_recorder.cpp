@@ -6,7 +6,8 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
-#include "std_srvs/srv/set_bool.hpp"
+// #include "std_srvs/srv/set_bool.hpp"
+#include <std_msgs/msg/bool.hpp>
 
 namespace fs = std::filesystem;
 
@@ -58,9 +59,11 @@ public:
     );
 
     // レコーディングスタート/ストップ用のサービス
-    record_service_ = this->create_service<std_srvs::srv::SetBool>(
-        "fly_set_recording",
-        std::bind(&Grasshopper3Viewer::set_recording_callback, this, std::placeholders::_1, std::placeholders::_2)
+    recording_sub_ = this->create_subscription<std_msgs::msg::Bool>(
+        "fly_recording_toggle", // お好みのトピック名
+        10,                     // QoS
+        std::bind(&Grasshopper3Viewer::toggle_recording_callback, 
+                  this, std::placeholders::_1)
     );
   }
 
@@ -294,44 +297,70 @@ private:
   }
 
   // サービスコールバック（レコーディングの開始／停止）
-  void set_recording_callback(
-      const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
-      std::shared_ptr<std_srvs::srv::SetBool::Response> response)
-  {
-      if (request->data)
-      {
-          // レコーディング開始
-          is_recording = true;
+  // void set_recording_callback(
+  //     const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+  //     std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+  // {
+  //     if (request->data)
+  //     {
+  //         // レコーディング開始
+  //         is_recording = true;
 
-          // ★★★ 新しいタイムスタンプ付きフォルダを作成 ★★★
-          // 例: base_save_directory/20241229_144756_123456
-          auto now = std::chrono::system_clock::now();
-          auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-          auto now_t = std::chrono::system_clock::to_time_t(now);
-          auto us_part = now_us % 1000000;
+  //         // ★★★ 新しいタイムスタンプ付きフォルダを作成 ★★★
+  //         // 例: base_save_directory/20241229_144756_123456
+  //         auto now = std::chrono::system_clock::now();
+  //         auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+  //         auto now_t = std::chrono::system_clock::to_time_t(now);
+  //         auto us_part = now_us % 1000000;
 
-          std::stringstream ss;
-          ss << base_save_directory << "/" << std::put_time(std::localtime(&now_t), "%Y%m%d_%H%M%S")
-            << "_" << std::setw(6) << std::setfill('0') << us_part;
+  //         std::stringstream ss;
+  //         ss << base_save_directory << "/" << std::put_time(std::localtime(&now_t), "%Y%m%d_%H%M%S")
+  //           << "_" << std::setw(6) << std::setfill('0') << us_part;
 
-          current_save_directory = ss.str();
+  //         current_save_directory = ss.str();
 
-          // ディレクトリ作成
-          fs::create_directories(current_save_directory);
+  //         // ディレクトリ作成
+  //         fs::create_directories(current_save_directory);
 
-          response->success = true;
-          response->message = "Recording started in directory " + current_save_directory;
-          RCLCPP_INFO(this->get_logger(), "Recording started: %s", current_save_directory.c_str());
+  //         response->success = true;
+  //         response->message = "Recording started in directory " + current_save_directory;
+  //         RCLCPP_INFO(this->get_logger(), "Recording started: %s", current_save_directory.c_str());
+  //     }
+  //     else
+  //     {
+  //         // レコーディング停止
+  //         is_recording = false;
+  //         response->success = true;
+  //         response->message = "Recording stopped.";
+  //         RCLCPP_INFO(this->get_logger(), "Recording stopped.");
+  //     }
+  // }
+    void toggle_recording_callback(const std_msgs::msg::Bool::SharedPtr msg)
+    {
+      if (msg->data) {
+        // ★録画開始
+        is_recording = true;
+
+        // 新しいディレクトリを作成 (元コードの流れと同様)
+        auto now = std::chrono::system_clock::now();
+        auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+        auto now_t = std::chrono::system_clock::to_time_t(now);
+        auto us_part = now_us % 1000000;
+
+        std::stringstream ss;
+        ss << base_save_directory << "/" << std::put_time(std::localtime(&now_t), "%Y%m%d_%H%M%S")
+          << "_" << std::setw(6) << std::setfill('0') << us_part;
+
+        current_save_directory = ss.str();
+        fs::create_directories(current_save_directory);
+
+        RCLCPP_INFO(this->get_logger(), "Recording started in directory: %s", current_save_directory.c_str());
+      } else {
+        // ★録画停止
+        is_recording = false;
+        RCLCPP_INFO(this->get_logger(), "Recording stopped.");
       }
-      else
-      {
-          // レコーディング停止
-          is_recording = false;
-          response->success = true;
-          response->message = "Recording stopped.";
-          RCLCPP_INFO(this->get_logger(), "Recording stopped.");
-      }
-  }
+    }
 
   int timeout;
   int frame_rate_ms;
@@ -346,7 +375,7 @@ private:
   FlyCapture2::BusManager busMgr;
   FlyCapture2::Camera *camera;
   rclcpp::TimerBase::SharedPtr timer_;
-  rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr record_service_;
+  // rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr record_service_;
 
   std::queue<ImageData> image_queue;
   std::mutex queue_mutex;
@@ -355,6 +384,8 @@ private:
 
   bool is_recording;
   bool stop_saving;
+
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr recording_sub_;
 };
 
 int main(int argc, char *argv[])
