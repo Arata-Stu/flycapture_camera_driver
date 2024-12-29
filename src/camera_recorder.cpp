@@ -253,70 +253,78 @@ private:
   // 画像保存用スレッド
   void save_images()
   {
-    while (!stop_saving)
-    {
-      std::unique_lock<std::mutex> lock(queue_mutex);
-      condition.wait(lock, [this]() { return !image_queue.empty() || stop_saving; });
-
-      while (!image_queue.empty())
+      while (!stop_saving)
       {
-        ImageData data = image_queue.front();
-        image_queue.pop();
-        lock.unlock();
+          std::unique_lock<std::mutex> lock(queue_mutex);
+          condition.wait(lock, [this]() { return !image_queue.empty() || stop_saving; });
 
-        // タイムスタンプ
-        unsigned long sec = data.timestamp.seconds;
-        unsigned long usec = data.timestamp.microSeconds;
+          while (!image_queue.empty())
+          {
+              ImageData data = image_queue.front();
+              image_queue.pop();
+              lock.unlock();
 
-        // ファイル名: frame_sec_usec.jpg
-        std::ostringstream filename;
-        filename << current_save_directory << "/frame_"
-                 << sec << "_"
-                 << std::setw(6) << std::setfill('0') << usec
-                 << ".jpg";
+              // タイムスタンプを生成
+              unsigned long sec = data.timestamp.seconds;
+              unsigned long usec = data.timestamp.microSeconds;
 
-        // JPEG で保存
-        std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 90};
-        cv::imwrite(filename.str(), data.image, compression_params);
+              // ファイル名: frame_YYYYMMDD_HHMMSS_UUUUUU.jpg
+              std::ostringstream filename;
+              std::time_t time_sec = static_cast<std::time_t>(sec);
+              std::tm *tm = std::localtime(&time_sec);
 
-        lock.lock();
+              filename << current_save_directory << "/frame_"
+                      << std::put_time(tm, "%Y%m%d_%H%M%S") << "_"
+                      << std::setw(6) << std::setfill('0') << usec
+                      << ".jpg";
+
+              // JPEG で保存
+              std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 90};
+              cv::imwrite(filename.str(), data.image, compression_params);
+
+              lock.lock();
+          }
       }
-    }
   }
 
   // サービスコールバック（レコーディングの開始／停止）
   void set_recording_callback(
-    const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
-    std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+      const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+      std::shared_ptr<std_srvs::srv::SetBool::Response> response)
   {
-    if (request->data)
-    {
-      // レコーディング開始
-      is_recording = true;
+      if (request->data)
+      {
+          // レコーディング開始
+          is_recording = true;
 
-      // ★★★ 新しいタイムスタンプ付きフォルダを作成 ★★★
-      // 例: base_save_directory/20241229_153045 など
-      auto now      = std::chrono::system_clock::now();
-      auto now_t    = std::chrono::system_clock::to_time_t(now);
-      std::stringstream ss;
-      ss << base_save_directory << "/" << std::put_time(std::localtime(&now_t), "%Y%m%d_%H%M%S");
-      current_save_directory = ss.str();
+          // ★★★ 新しいタイムスタンプ付きフォルダを作成 ★★★
+          // 例: base_save_directory/20241229_144756_123456
+          auto now = std::chrono::system_clock::now();
+          auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+          auto now_t = std::chrono::system_clock::to_time_t(now);
+          auto us_part = now_us % 1000000;
 
-      // ディレクトリ作成
-      fs::create_directories(current_save_directory);
+          std::stringstream ss;
+          ss << base_save_directory << "/" << std::put_time(std::localtime(&now_t), "%Y%m%d_%H%M%S")
+            << "_" << std::setw(6) << std::setfill('0') << us_part;
 
-      response->success = true;
-      response->message = "Recording started in directory " + current_save_directory;
-      RCLCPP_INFO(this->get_logger(), "Recording started: %s", current_save_directory.c_str());
-    }
-    else
-    {
-      // レコーディング停止
-      is_recording = false;
-      response->success = true;
-      response->message = "Recording stopped.";
-      RCLCPP_INFO(this->get_logger(), "Recording stopped.");
-    }
+          current_save_directory = ss.str();
+
+          // ディレクトリ作成
+          fs::create_directories(current_save_directory);
+
+          response->success = true;
+          response->message = "Recording started in directory " + current_save_directory;
+          RCLCPP_INFO(this->get_logger(), "Recording started: %s", current_save_directory.c_str());
+      }
+      else
+      {
+          // レコーディング停止
+          is_recording = false;
+          response->success = true;
+          response->message = "Recording stopped.";
+          RCLCPP_INFO(this->get_logger(), "Recording stopped.");
+      }
   }
 
   int timeout;
