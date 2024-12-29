@@ -270,12 +270,12 @@ private:
 
         // ファイル名: frame_sec_usec.jpg
         std::ostringstream filename;
-        filename << base_save_directory << "/frame_"
+        filename << current_save_directory << "/frame_"
                  << sec << "_"
                  << std::setw(6) << std::setfill('0') << usec
                  << ".jpg";
 
-        // 保存 (JPEG)
+        // JPEG で保存
         std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 90};
         cv::imwrite(filename.str(), data.image, compression_params);
 
@@ -293,9 +293,21 @@ private:
     {
       // レコーディング開始
       is_recording = true;
+
+      // ★★★ 新しいタイムスタンプ付きフォルダを作成 ★★★
+      // 例: base_save_directory/20241229_153045 など
+      auto now      = std::chrono::system_clock::now();
+      auto now_t    = std::chrono::system_clock::to_time_t(now);
+      std::stringstream ss;
+      ss << base_save_directory << "/" << std::put_time(std::localtime(&now_t), "%Y%m%d_%H%M%S");
+      current_save_directory = ss.str();
+
+      // ディレクトリ作成
+      fs::create_directories(current_save_directory);
+
       response->success = true;
-      response->message = "Recording started in directory " + base_save_directory;
-      RCLCPP_INFO(this->get_logger(), "Recording started: %s", base_save_directory.c_str());
+      response->message = "Recording started in directory " + current_save_directory;
+      RCLCPP_INFO(this->get_logger(), "Recording started: %s", current_save_directory.c_str());
     }
     else
     {
@@ -310,10 +322,10 @@ private:
   int timeout;
   int frame_rate_ms;
 
-  // ★★★ 追加したパラメータ用メンバ変数 ★★★
   std::string video_mode_str;
   std::string frame_rate_str;
 
+  std::string current_save_directory;   
   std::string base_save_directory;
 
   FlyCapture2::BusManager busMgr;
