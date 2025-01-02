@@ -12,6 +12,8 @@
 #include <sstream>
 
 #include "std_srvs/srv/set_bool.hpp"  // レコーディング開始/停止サービス
+#include "std_msgs/msg/bool.hpp" // Boolメッセージ用
+
 
 namespace fs = std::filesystem;
 
@@ -323,6 +325,8 @@ public:
         std::chrono::milliseconds(frame_rate_ms),
         std::bind(&Grasshopper3Viewer::capture_callback, this));
 
+    recording_status_publisher_ = this->create_publisher<std_msgs::msg::Bool>("recording_status", 10);
+
     // レコーディングを開始/停止するサービス
     record_service_ = this->create_service<std_srvs::srv::SetBool>(
         "set_recording",
@@ -402,7 +406,7 @@ private:
           auto us_part = now_us % 1000000;
 
           std::stringstream ss;
-          ss << base_save_directory << "/recording_"
+          ss << base_save_directory << "/"
             << std::put_time(std::localtime(&now_t), "%Y%m%d_%H%M%S")
             << "_" << std::setw(6) << std::setfill('0') << us_part;
 
@@ -421,6 +425,11 @@ private:
           response->success = true;
           response->message = "Recording started in: " + recording_dir;
           RCLCPP_INFO(this->get_logger(), "Recording started in: %s", recording_dir.c_str());
+
+          // トピックでTrueを送信
+          std_msgs::msg::Bool msg;
+          msg.data = true;
+          recording_status_publisher_->publish(msg);
       }
       else
       {
@@ -433,6 +442,11 @@ private:
           response->success = true;
           response->message = "Recording stopped.";
           RCLCPP_INFO(this->get_logger(), "Recording stopped.");
+
+          // トピックでFalseを送信
+          std_msgs::msg::Bool msg;
+          msg.data = false;
+          recording_status_publisher_->publish(msg);
       }
   }
 
@@ -443,6 +457,7 @@ private:
   std::vector<std::shared_ptr<CameraHandler>> camera_handlers;
   rclcpp::TimerBase::SharedPtr capture_timer;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr record_service_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr recording_status_publisher_; // パブリッシャー
 
   // パラメータ
   std::string base_save_directory;
