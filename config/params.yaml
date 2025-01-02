@@ -7,6 +7,9 @@
     frame_rate: 'FRAMERATE_30'
     show_window: true
 
+    right_camera_serial: ""
+    left_camera_serial: ""
+
 
 ## VIDEO_MODEのリストをすべて列挙する
 # VIDEOMODE_160x120YUV444

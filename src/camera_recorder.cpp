@@ -285,14 +285,18 @@ public:
         stop_all(false)
   {
     // パラメータ宣言
+    this->declare_parameter<std::string>("right_camera_serial", "");
+    this->declare_parameter<std::string>("left_camera_serial", "");
     this->declare_parameter<int>("timeout", 1000);
     this->declare_parameter<int>("frame_rate_ms", 33);
     this->declare_parameter<std::string>("save_directory", "./images");
     this->declare_parameter<std::string>("video_mode", "VIDEOMODE_800x600YUV422");
     this->declare_parameter<std::string>("frame_rate", "FRAMERATE_30");
-    this->declare_parameter<bool>("show_window", false); // 必要なら表示
+    this->declare_parameter<bool>("show_window", false);
 
     // パラメータ取得
+    std::string right_serial = this->get_parameter("right_camera_serial").as_string();
+    std::string left_serial = this->get_parameter("left_camera_serial").as_string();
     timeout_ms = this->get_parameter("timeout").as_int();
     frame_rate_ms = this->get_parameter("frame_rate_ms").as_int();
     base_save_directory = this->get_parameter("save_directory").as_string();
@@ -310,29 +314,97 @@ public:
     unsigned int num_cameras = get_num_cameras(&busMgr);
     RCLCPP_INFO(this->get_logger(), "Detected %u cameras.", num_cameras);
 
-    // カメラごとのハンドラを生成
-    for (unsigned int i = 0; i < num_cameras; ++i)
+    // シリアル番号でカメラを割り当て
+    std::unordered_map<unsigned int, std::string> camera_roles; // カメラの役割（右/左）
+    if (!right_serial.empty())
     {
-      auto handler = std::make_shared<CameraHandler>(
-          i, busMgr, base_save_directory,
-          video_mode_str, frame_rate_str,
-          timeout_ms);
-      camera_handlers.push_back(handler);
+        camera_roles[std::stoul(right_serial)] = "right";
+    }
+    if (!left_serial.empty())
+    {
+        camera_roles[std::stoul(left_serial)] = "left";
     }
 
-    // キャプチャ処理を回すためのタイマー (frame_rate_msごと)
+    // カメラを初期化
+    for (unsigned int i = 0; i < num_cameras; ++i)
+    {
+        FlyCapture2::PGRGuid guid;
+        FlyCapture2::Error error = busMgr.GetCameraFromIndex(i, &guid);
+        if (error != FlyCapture2::PGRERROR_OK)
+        {
+            error.PrintErrorTrace();
+            continue;
+        }
+
+        FlyCapture2::Camera camera;
+        error = camera.Connect(&guid);
+        if (error != FlyCapture2::PGRERROR_OK)
+        {
+            error.PrintErrorTrace();
+            continue;
+        }
+
+        FlyCapture2::CameraInfo camera_info;
+        error = camera.GetCameraInfo(&camera_info);
+        if (error != FlyCapture2::PGRERROR_OK)
+        {
+            error.PrintErrorTrace();
+            continue;
+        }
+
+        unsigned int serial_number = camera_info.serialNumber;
+        std::string role = "random";
+
+        // シリアル番号に基づく役割の割り当て
+        if (camera_roles.find(serial_number) != camera_roles.end())
+        {
+            role = camera_roles[serial_number];
+            camera_roles.erase(serial_number);
+        }
+
+        // カメラハンドラを作成
+        auto handler = std::make_shared<CameraHandler>(
+            i, busMgr, base_save_directory,
+            video_mode_str, frame_rate_str,
+            timeout_ms);
+
+        camera_handlers.push_back(handler);
+
+        if (role == "right")
+        {
+            right_camera = handler;
+            RCLCPP_INFO(this->get_logger(), "Assigned camera %u as RIGHT", serial_number);
+        }
+        else if (role == "left")
+        {
+            left_camera = handler;
+            RCLCPP_INFO(this->get_logger(), "Assigned camera %u as LEFT", serial_number);
+        }
+        else
+        {
+            random_cameras.push_back(handler);
+            RCLCPP_INFO(this->get_logger(), "Assigned camera %u as RANDOM", serial_number);
+        }
+    }
+
+    // ランダムカメラのログ出力
+    if (!random_cameras.empty())
+    {
+        RCLCPP_INFO(this->get_logger(), "%lu cameras assigned as RANDOM.", random_cameras.size());
+    }
+
+    // タイマー設定
     capture_timer = this->create_wall_timer(
         std::chrono::milliseconds(frame_rate_ms),
         std::bind(&Grasshopper3Viewer::capture_callback, this));
-
-    recording_status_publisher_ = this->create_publisher<std_msgs::msg::Bool>("recording_status", 10);
 
     // レコーディングを開始/停止するサービス
     record_service_ = this->create_service<std_srvs::srv::SetBool>(
         "set_recording",
         std::bind(&Grasshopper3Viewer::set_recording_callback,
-                  this, std::placeholders::_1, std::placeholders::_2));
-  }
+                    this, std::placeholders::_1, std::placeholders::_2));
+}
+
 
   ~Grasshopper3Viewer()
   {
@@ -453,6 +525,11 @@ private:
   //-----------------------------------------
   // メンバ変数
   //-----------------------------------------
+
+  std::shared_ptr<CameraHandler> right_camera = nullptr;
+  std::shared_ptr<CameraHandler> left_camera = nullptr;
+  std::vector<std::shared_ptr<CameraHandler>> random_cameras;
+
   FlyCapture2::BusManager busMgr;
   std::vector<std::shared_ptr<CameraHandler>> camera_handlers;
   rclcpp::TimerBase::SharedPtr capture_timer;
