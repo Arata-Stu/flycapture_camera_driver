@@ -6,6 +6,7 @@
     video_mode: 'VIDEOMODE_800x600YUV422'
     frame_rate: 'FRAMERATE_30'
     show_window: true
+    directory_switch_interval: 300 ## sec
 
     right_camera_serial: "16400750"
     left_camera_serial: "" #"16400757"
