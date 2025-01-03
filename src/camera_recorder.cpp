@@ -217,8 +217,7 @@ private:
         std::tm *tm = std::localtime(&time_sec);
 
         std::ostringstream filename;
-        filename << current_save_directory << "/camera_" << camera_index << "_"
-                 << std::put_time(tm, "%Y%m%d_%H%M%S") << "_"
+        filename << current_save_directory << "/" <<std::put_time(tm, "%Y%m%d_%H%M%S") << "_"
                  << std::setw(6) << std::setfill('0') << usec << ".jpg";
 
         // JPEGで保存
@@ -398,6 +397,11 @@ public:
         std::chrono::milliseconds(frame_rate_ms),
         std::bind(&Grasshopper3Viewer::capture_callback, this));
 
+    recording_status_publisher_ = this->create_publisher<std_msgs::msg::Bool>(
+        "recording_status",  // お好みのトピック名
+        10                   // キューサイズ
+    );
+
     // レコーディングを開始/停止するサービス
     record_service_ = this->create_service<std_srvs::srv::SetBool>(
         "set_recording",
@@ -466,8 +470,8 @@ private:
   // レコーディング開始/停止サービスのコールバック
   //-----------------------------------------
   void set_recording_callback(
-      const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
-      std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+    const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+    std::shared_ptr<std_srvs::srv::SetBool::Response> response)
   {
       if (request->data)
       {
@@ -488,9 +492,24 @@ private:
           // カメラごとにサブディレクトリを作成
           for (size_t i = 0; i < camera_handlers.size(); ++i)
           {
-              std::string camera_dir = recording_dir + "/camera_" + std::to_string(i);
-              fs::create_directories(camera_dir);
+              std::string camera_dir;
 
+              // カメラが右または左として定義されている場合
+              if (camera_handlers[i] == right_camera)
+              {
+                  camera_dir = recording_dir + "/right_camera";
+              }
+              else if (camera_handlers[i] == left_camera)
+              {
+                  camera_dir = recording_dir + "/left_camera";
+              }
+              else
+              {
+                  // その他のカメラ
+                  camera_dir = recording_dir + "/camera_" + std::to_string(i);
+              }
+
+              fs::create_directories(camera_dir);
               camera_handlers[i]->start_recording(camera_dir);  // サブディレクトリを設定
           }
 
@@ -521,6 +540,7 @@ private:
           recording_status_publisher_->publish(msg);
       }
   }
+
 
   //-----------------------------------------
   // メンバ変数
