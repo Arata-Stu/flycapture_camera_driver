@@ -12,8 +12,7 @@
 #include <sstream>
 
 #include "std_srvs/srv/set_bool.hpp"  // レコーディング開始/停止サービス
-#include "std_msgs/msg/bool.hpp" // Boolメッセージ用
-
+#include "std_msgs/msg/string.hpp"    // トピックをString型に変更
 
 namespace fs = std::filesystem;
 
@@ -104,20 +103,16 @@ public:
       // レコーディング中ならキューに追加
       if (is_recording)
       {
-          // キューに画像データを追加
           ImageData data;
           data.image = frame.clone();  // データのコピーを保存
           data.timestamp = raw_image.GetTimeStamp();
-
           {
               std::lock_guard<std::mutex> lock(queue_mutex);
               image_queue.push(data);
           }
           condition.notify_one();
       }
-      
   }
-
 
   // レコーディング開始
   void start_recording(const std::string &save_dir)
@@ -134,6 +129,12 @@ public:
   void stop_recording()
   {
     is_recording = false;
+  }
+
+  // is_recording の状態を取得するためのメソッド
+  bool isRecording() const
+  {
+    return is_recording;
   }
 
 private:
@@ -217,7 +218,8 @@ private:
         std::tm *tm = std::localtime(&time_sec);
 
         std::ostringstream filename;
-        filename << current_save_directory << "/" <<std::put_time(tm, "%Y%m%d_%H%M%S") << "_"
+        filename << current_save_directory << "/"
+                 << std::put_time(tm, "%Y%m%d_%H%M%S") << "_"
                  << std::setw(6) << std::setfill('0') << usec << ".jpg";
 
         // JPEGで保存
@@ -293,6 +295,10 @@ public:
     this->declare_parameter<std::string>("frame_rate", "FRAMERATE_30");
     this->declare_parameter<bool>("show_window", false);
 
+    // ディレクトリを切り替える間隔（秒）を追加
+    // 例：10秒ごとにディレクトリを切り替えたい場合は10を設定
+    this->declare_parameter<int>("directory_switch_interval", 10); 
+
     // パラメータ取得
     std::string right_serial = this->get_parameter("right_camera_serial").as_string();
     std::string left_serial = this->get_parameter("left_camera_serial").as_string();
@@ -302,6 +308,8 @@ public:
     video_mode_str = this->get_parameter("video_mode").as_string();
     frame_rate_str = this->get_parameter("frame_rate").as_string();
     show_window = this->get_parameter("show_window").as_bool();
+
+    directory_switch_interval_ = this->get_parameter("directory_switch_interval").as_int();
 
     // 保存先ディレクトリ作成
     if (!fs::exists(base_save_directory))
@@ -392,13 +400,14 @@ public:
         RCLCPP_INFO(this->get_logger(), "%lu cameras assigned as RANDOM.", random_cameras.size());
     }
 
-    // タイマー設定
+    // フレーム取得用のタイマー設定
     capture_timer = this->create_wall_timer(
         std::chrono::milliseconds(frame_rate_ms),
         std::bind(&Grasshopper3Viewer::capture_callback, this));
 
-    recording_status_publisher_ = this->create_publisher<std_msgs::msg::Bool>(
-        "recording_status",  // お好みのトピック名
+    // レコーディング状態通知用のパブリッシャ（String型）
+    recording_status_publisher_ = this->create_publisher<std_msgs::msg::String>(
+        "recording_status",  // トピック名
         10                   // キューサイズ
     );
 
@@ -407,12 +416,17 @@ public:
         "set_recording",
         std::bind(&Grasshopper3Viewer::set_recording_callback,
                     this, std::placeholders::_1, std::placeholders::_2));
-}
 
+    // ここでは directory_switch_timer_ は生成しない
+    // -> レコーディング開始時に生成し、レコーディング停止時に破棄する
+  }
 
   ~Grasshopper3Viewer()
   {
+    // ノード終了時
     stop_all = true;
+    // もしタイマーが生きていれば破棄
+    stop_directory_switch_timer();
   }
 
 private:
@@ -439,7 +453,7 @@ private:
   }
 
   //-----------------------------------------
-  // フレーム取得をするタイマーコールバック
+  // フレーム取得用のタイマーコールバック
   //-----------------------------------------
   void capture_callback()
   {
@@ -468,6 +482,8 @@ private:
 
   //-----------------------------------------
   // レコーディング開始/停止サービスのコールバック
+  //   true -> "start"
+  //   false -> "stop"
   //-----------------------------------------
   void set_recording_callback(
     const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
@@ -483,18 +499,16 @@ private:
 
           std::stringstream ss;
           ss << base_save_directory << "/"
-            << std::put_time(std::localtime(&now_t), "%Y%m%d_%H%M%S")
-            << "_" << std::setw(6) << std::setfill('0') << us_part;
+             << std::put_time(std::localtime(&now_t), "%Y%m%d_%H%M%S")
+             << "_" << std::setw(6) << std::setfill('0') << us_part;
 
           std::string recording_dir = ss.str();
           fs::create_directories(recording_dir);
 
-          // カメラごとにサブディレクトリを作成
+          // カメラごとにサブディレクトリを作成＆start_recordingを呼ぶ
           for (size_t i = 0; i < camera_handlers.size(); ++i)
           {
               std::string camera_dir;
-
-              // カメラが右または左として定義されている場合
               if (camera_handlers[i] == right_camera)
               {
                   camera_dir = recording_dir + "/right_camera";
@@ -505,22 +519,26 @@ private:
               }
               else
               {
-                  // その他のカメラ
                   camera_dir = recording_dir + "/camera_" + std::to_string(i);
               }
 
               fs::create_directories(camera_dir);
-              camera_handlers[i]->start_recording(camera_dir);  // サブディレクトリを設定
+              camera_handlers[i]->start_recording(camera_dir);
           }
 
           response->success = true;
           response->message = "Recording started in: " + recording_dir;
           RCLCPP_INFO(this->get_logger(), "Recording started in: %s", recording_dir.c_str());
 
-          // トピックでTrueを送信
-          std_msgs::msg::Bool msg;
-          msg.data = true;
-          recording_status_publisher_->publish(msg);
+          // トピックで"start"を送信
+          {
+            std_msgs::msg::String msg;
+            msg.data = "start";
+            recording_status_publisher_->publish(msg);
+          }
+
+          // ディレクトリ切り替え用タイマーをスタート
+          start_directory_switch_timer();
       }
       else
       {
@@ -534,27 +552,135 @@ private:
           response->message = "Recording stopped.";
           RCLCPP_INFO(this->get_logger(), "Recording stopped.");
 
-          // トピックでFalseを送信
-          std_msgs::msg::Bool msg;
-          msg.data = false;
-          recording_status_publisher_->publish(msg);
+          // トピックで"stop"を送信
+          {
+            std_msgs::msg::String msg;
+            msg.data = "stop";
+            recording_status_publisher_->publish(msg);
+          }
+
+          // ディレクトリ切り替え用タイマーをストップ(破棄)
+          stop_directory_switch_timer();
       }
   }
 
+  //-----------------------------------------
+  // ディレクトリ切り替え用タイマーのスタート
+  // （すでにタイマーが生成されている場合は再生成しない）
+  //-----------------------------------------
+  void start_directory_switch_timer()
+  {
+    if (!directory_switch_timer_)
+    {
+      directory_switch_timer_ = this->create_wall_timer(
+        std::chrono::seconds(directory_switch_interval_),
+        std::bind(&Grasshopper3Viewer::switch_directory_timer_callback, this));
+    }
+  }
+
+  //-----------------------------------------
+  // ディレクトリ切り替え用タイマーのストップ(破棄)
+  // -> reset() することでタイマーは無効になる
+  //-----------------------------------------
+  void stop_directory_switch_timer()
+  {
+    if (directory_switch_timer_)
+    {
+      directory_switch_timer_.reset();
+    }
+  }
+
+  //-----------------------------------------
+  // ディレクトリをスイッチするためのタイマーコールバック
+  // 「録画中」のカメラに対してのみディレクトリを再設定し、
+  // そのタイミングで"switch"をPublishする
+  //-----------------------------------------
+  void switch_directory_timer_callback()
+  {
+    // どれか一つでも録画中のカメラがあればディレクトリ切り替え
+    bool any_recording = false;
+    for (auto &handler : camera_handlers)
+    {
+      if (handler->isRecording())
+      {
+        any_recording = true;
+        break;
+      }
+    }
+
+    // 録画中でなければ何もしない
+    if (!any_recording)
+    {
+      return;
+    }
+
+    // 新しいディレクトリを作って再度 start_recording
+    auto now = std::chrono::system_clock::now();
+    auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+    auto now_t = std::chrono::system_clock::to_time_t(now);
+    auto us_part = now_us % 1000000;
+
+    std::stringstream ss;
+    ss << base_save_directory << "/"
+       << std::put_time(std::localtime(&now_t), "%Y%m%d_%H%M%S")
+       << "_" << std::setw(6) << std::setfill('0') << us_part;
+
+    std::string new_dir = ss.str();
+    fs::create_directories(new_dir);
+
+    // 各カメラについて、録画中のもののみディレクトリを切り替える
+    for (size_t i = 0; i < camera_handlers.size(); ++i)
+    {
+      if (camera_handlers[i]->isRecording())
+      {
+        std::string camera_dir;
+        if (camera_handlers[i] == right_camera)
+        {
+            camera_dir = new_dir + "/right_camera";
+        }
+        else if (camera_handlers[i] == left_camera)
+        {
+            camera_dir = new_dir + "/left_camera";
+        }
+        else
+        {
+            camera_dir = new_dir + "/camera_" + std::to_string(i);
+        }
+
+        fs::create_directories(camera_dir);
+        camera_handlers[i]->start_recording(camera_dir);
+      }
+    }
+
+    RCLCPP_INFO(this->get_logger(), "Switched recording directory to: %s", new_dir.c_str());
+
+    // "switch" をトピックにpub
+    std_msgs::msg::String msg;
+    msg.data = "switch";
+    recording_status_publisher_->publish(msg);
+  }
 
   //-----------------------------------------
   // メンバ変数
   //-----------------------------------------
-
   std::shared_ptr<CameraHandler> right_camera = nullptr;
   std::shared_ptr<CameraHandler> left_camera = nullptr;
   std::vector<std::shared_ptr<CameraHandler>> random_cameras;
 
   FlyCapture2::BusManager busMgr;
   std::vector<std::shared_ptr<CameraHandler>> camera_handlers;
+
+  // フレーム取得用のタイマー
   rclcpp::TimerBase::SharedPtr capture_timer;
+
+  // ★ ディレクトリ切り替え用のタイマー(記録中のみ有効)
+  rclcpp::TimerBase::SharedPtr directory_switch_timer_;  
+
+  // レコーディング開始/停止サービス
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr record_service_;
-  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr recording_status_publisher_; // パブリッシャー
+
+  // パブリッシャー(String型)
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr recording_status_publisher_;
 
   // パラメータ
   std::string base_save_directory;
@@ -563,6 +689,9 @@ private:
   int timeout_ms;
   int frame_rate_ms;
   bool show_window;
+
+  // ディレクトリ切り替え周期(秒)
+  int directory_switch_interval_;
 
   bool stop_all;
 };
