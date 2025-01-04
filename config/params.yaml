@@ -2,14 +2,14 @@
   ros__parameters:
     timeout: 1000
     frame_rate_ms: 10 ## ms
-    save_directory: '/home/anubis/recording/images'
+    save_directory: '/home/arata/recording/images'
     video_mode: 'VIDEOMODE_800x600YUV422'
     frame_rate: 'FRAMERATE_30'
     show_window: true
     directory_switch_interval: 300 ## sec
 
     right_camera_serial: "16400750"
-    left_camera_serial: "" #"16400757"
+    left_camera_serial: "16400757" #"16400757"
 
 
 ## VIDEO_MODEのリストをすべて列挙する
