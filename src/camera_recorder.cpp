@@ -237,6 +237,7 @@ private:
     // 必要なモードが増えた場合は随時追加
     if (mode_str == "VIDEOMODE_640x480Y8") return FlyCapture2::VIDEOMODE_640x480Y8;
     if (mode_str == "VIDEOMODE_800x600YUV422") return FlyCapture2::VIDEOMODE_800x600YUV422;
+    if (mode_str == "VIDEOMODE_1600x1200YUV422") return FlyCapture2::VIDEOMODE_1600x1200YUV422;
     if (mode_str == "VIDEOMODE_FORMAT7") return FlyCapture2::VIDEOMODE_FORMAT7;
 
     // 例外
@@ -457,28 +458,58 @@ private:
   //-----------------------------------------
   void capture_callback()
   {
-      std::vector<cv::Mat> frames;
-
-      // 各カメラのフレームを取得
-      for (size_t i = 0; i < camera_handlers.size(); ++i)
+      // まずは全カメラのフレームを取得
+      std::map<std::shared_ptr<CameraHandler>, cv::Mat> camera_to_frame;
+      for (auto &handler : camera_handlers)
       {
           cv::Mat frame;
-          camera_handlers[i]->grab_frame(frame);  // フレームを取得して frame に格納
-          if (!frame.empty())
+          handler->grab_frame(frame);
+          camera_to_frame[handler] = frame;
+      }
+
+      // 表示順を決める
+      std::vector<cv::Mat> frames_in_order;
+
+      // 1. left_camera があれば push_back
+      if (left_camera)
+      {
+          auto it = camera_to_frame.find(left_camera);
+          if (it != camera_to_frame.end() && !it->second.empty())
           {
-              frames.push_back(frame);
+              frames_in_order.push_back(it->second);
           }
       }
 
-      if (show_window && !frames.empty())
+      // 2. right_camera があれば push_back
+      if (right_camera)
       {
-          // フレームを横に並べて1つのウィンドウに表示
+          auto it = camera_to_frame.find(right_camera);
+          if (it != camera_to_frame.end() && !it->second.empty())
+          {
+              frames_in_order.push_back(it->second);
+          }
+      }
+
+      // 3. random_cameras（カメラ_i）を push_back
+      for (auto &random_cam : random_cameras)
+      {
+          auto it = camera_to_frame.find(random_cam);
+          if (it != camera_to_frame.end() && !it->second.empty())
+          {
+              frames_in_order.push_back(it->second);
+          }
+      }
+
+      // frames_in_order が空でなければ結合して表示
+      if (!frames_in_order.empty())
+      {
           cv::Mat concatenated_frame;
-          cv::hconcat(frames, concatenated_frame);  // フレームを横方向に結合
+          cv::hconcat(frames_in_order, concatenated_frame);
           cv::imshow("Camera View", concatenated_frame);
           cv::waitKey(1);
       }
   }
+
 
   //-----------------------------------------
   // レコーディング開始/停止サービスのコールバック

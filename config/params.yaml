@@ -8,8 +8,8 @@
     show_window: true
     directory_switch_interval: 300 ## sec
 
-    right_camera_serial: "16400750"
-    left_camera_serial: "16400757" #"16400757"
+    right_camera_serial: "16400757" # right 16400757
+    left_camera_serial: "16400750" #"left 16400750"
 
 
 ## VIDEO_MODEのリストをすべて列挙する
