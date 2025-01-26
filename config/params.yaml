@@ -6,10 +6,11 @@
     video_mode: 'VIDEOMODE_800x600YUV422'
     frame_rate: 'FRAMERATE_30'
     show_window: true
-    directory_switch_interval: 300 ## sec
+    directory_switch_interval: 60 ## sec
+    rotate_180: true
 
-    right_camera_serial: "16400757" # right 16400757
-    left_camera_serial: "16400750" #"left 16400750"
+    right_camera_serial: "16400750" # right 16400757
+    left_camera_serial: "16400757" #"left 16400750"
 
 
 ## VIDEO_MODEのリストをすべて列挙する

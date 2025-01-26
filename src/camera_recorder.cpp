@@ -299,6 +299,7 @@ public:
     // ディレクトリを切り替える間隔（秒）を追加
     // 例：10秒ごとにディレクトリを切り替えたい場合は10を設定
     this->declare_parameter<int>("directory_switch_interval", 10); 
+    this->declare_parameter<bool>("rotate_180", false);
 
     // パラメータ取得
     std::string right_serial = this->get_parameter("right_camera_serial").as_string();
@@ -311,6 +312,8 @@ public:
     show_window = this->get_parameter("show_window").as_bool();
 
     directory_switch_interval_ = this->get_parameter("directory_switch_interval").as_int();
+    rotate_180 = this->get_parameter("rotate_180").as_bool();
+
 
     // 保存先ディレクトリ作成
     if (!fs::exists(base_save_directory))
@@ -458,7 +461,6 @@ private:
   //-----------------------------------------
   void capture_callback()
   {
-      // まずは全カメラのフレームを取得
       std::map<std::shared_ptr<CameraHandler>, cv::Mat> camera_to_frame;
       for (auto &handler : camera_handlers)
       {
@@ -467,40 +469,50 @@ private:
           camera_to_frame[handler] = frame;
       }
 
-      // 表示順を決める
       std::vector<cv::Mat> frames_in_order;
 
-      // 1. left_camera があれば push_back
       if (left_camera)
       {
           auto it = camera_to_frame.find(left_camera);
           if (it != camera_to_frame.end() && !it->second.empty())
           {
-              frames_in_order.push_back(it->second);
+              cv::Mat processed_frame = it->second.clone();
+              if (rotate_180)
+              {
+                  cv::rotate(processed_frame, processed_frame, cv::ROTATE_180);
+              }
+              frames_in_order.push_back(processed_frame);
           }
       }
 
-      // 2. right_camera があれば push_back
       if (right_camera)
       {
           auto it = camera_to_frame.find(right_camera);
           if (it != camera_to_frame.end() && !it->second.empty())
           {
-              frames_in_order.push_back(it->second);
+              cv::Mat processed_frame = it->second.clone();
+              if (rotate_180)
+              {
+                  cv::rotate(processed_frame, processed_frame, cv::ROTATE_180);
+              }
+              frames_in_order.push_back(processed_frame);
           }
       }
 
-      // 3. random_cameras（カメラ_i）を push_back
       for (auto &random_cam : random_cameras)
       {
           auto it = camera_to_frame.find(random_cam);
           if (it != camera_to_frame.end() && !it->second.empty())
           {
-              frames_in_order.push_back(it->second);
+              cv::Mat processed_frame = it->second.clone();
+              if (rotate_180)
+              {
+                  cv::rotate(processed_frame, processed_frame, cv::ROTATE_180);
+              }
+              frames_in_order.push_back(processed_frame);
           }
       }
 
-      // frames_in_order が空でなければ結合して表示
       if (!frames_in_order.empty())
       {
           cv::Mat concatenated_frame;
@@ -509,6 +521,7 @@ private:
           cv::waitKey(1);
       }
   }
+
 
 
   //-----------------------------------------
@@ -723,6 +736,7 @@ private:
 
   // ディレクトリ切り替え周期(秒)
   int directory_switch_interval_;
+  bool rotate_180;
 
   bool stop_all;
 };
